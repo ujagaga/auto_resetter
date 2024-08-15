@@ -1,19 +1,21 @@
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 
-#define STASSID "Rada_i_Slavica"
-#define STAPSK "pass12345"
-#define RESET_PERIOD  (3000ul)
-#define RELAY_PIN     (2)
-// Once an hour
-#define SYNC_TIMEOUT  (10*1000)
+#define STASSID       "WiFi_SSID"
+#define STAPSK        "WiFi_Pass"
+#define RESET_PERIOD  (30000ul)
+#define LED_PIN       (2)
+#define RELAY_PIN     (4)
+// Sync once an hour
+#define SYNC_TIMEOUT  (60*60*1000)
+// If time sync was not done for a long time, should blink LED to notify
+#define SYNC_ERROR_HOURS  (48)
 // Reset every day at RESET_HOUR:RESET_MINUTE
-#define RESET_HOUR    (21)
-#define RESET_MINUTE   (32)
+#define RESET_HOUR    (2)
+#define RESET_MINUTE  (0)
 
 const char* ssid = STASSID;  // your network SSID (name)
 const char* pass = STAPSK;   // your network password
-
 
 unsigned int localPort = 2390;  // local port to listen for UDP packets
 
@@ -34,21 +36,44 @@ WiFiUDP udp;
 uint32_t epoch = 0;
 uint32_t last_sync_timestamp = 0;
 uint32_t reset_timestamp = 0;
+uint32_t check_reset_timestamp = 0;
+uint32_t led_blink_timestamp = 0;
 
 void check_reset_time(){
-  uint32_t seconds_passed = millis() - last_sync_timestamp;
-  uint32_t current_epoch = epoch + seconds_passed;
-  uint32_t hour = (current_epoch % 86400L) / 3600;
-  uint32_t minute = (current_epoch % 3600) / 60;
+  if((millis() - check_reset_timestamp) > 20000){
+    uint32_t seconds_passed = (millis() - last_sync_timestamp)/1000;
+    uint32_t current_epoch = epoch + seconds_passed;
+    uint32_t hour = (current_epoch % 86400L) / 3600;
+    uint32_t minute = (current_epoch % 3600) / 60;
 
-  if((hour == RESET_HOUR) && (minute == RESET_MINUTE) && ((millis() - reset_timestamp) > 70000)){
-    // Do the reset
-    Serial.println("Resetting");
-    digitalWrite(RELAY_PIN, HIGH);  
-    delay(RESET_PERIOD);            
-    digitalWrite(RELAY_PIN, LOW);
-    Serial.println("Done");
-    reset_timestamp = millis();
+    Serial.print("\nTime:");
+    Serial.print(hour);
+    Serial.print(":");
+    Serial.println(minute);
+
+    if((hour == RESET_HOUR) && (minute == RESET_MINUTE) && ((millis() - reset_timestamp) > 70000)){
+      // Do the reset
+      Serial.println("Resetting");
+      digitalWrite(RELAY_PIN, HIGH);  
+      delay(RESET_PERIOD);            
+      digitalWrite(RELAY_PIN, LOW);
+      Serial.println("Done");
+      reset_timestamp = millis();
+    }
+    check_reset_timestamp = millis();
+  }
+}
+
+void check_sync_ok(){
+  uint32_t hours_not_synced = (millis() - last_sync_timestamp)/(60*60*1000);
+  if(hours_not_synced > SYNC_ERROR_HOURS){
+    // Time sync was too long ago. Should notify
+    if((millis() - led_blink_timestamp) > 2000){
+      digitalWrite(LED_PIN, HIGH);  
+      delay(1000);            
+      digitalWrite(LED_PIN, LOW);
+      led_blink_timestamp = millis();
+    }    
   }
 }
 
@@ -78,6 +103,7 @@ void setup() {
   Serial.println(udp.localPort());
 
   pinMode(RELAY_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
 }
 
 void loop() {
@@ -90,13 +116,9 @@ void loop() {
     delay(1000);
 
     int cb = udp.parsePacket();
-    if (!cb) {
-      Serial.println("no packet yet");
-    } else {
+    if (cb) {     
       last_sync_timestamp = millis();
 
-      Serial.print("packet received, length=");
-      Serial.println(cb);
       // We've received a packet, read the data from it
       udp.read(packetBuffer, NTP_PACKET_SIZE);  // read the packet into the buffer
 
@@ -108,18 +130,13 @@ void loop() {
       // combine the four bytes (two words) into a long integer
       // this is NTP time (seconds since Jan 1 1900):
       unsigned long secsSince1900 = highWord << 16 | lowWord;
-      Serial.print("Seconds since Jan 1 1900 = ");
-      Serial.println(secsSince1900);
 
       // now convert NTP time into everyday time:
-      Serial.print("Unix time = ");
       // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
       const unsigned long seventyYears = 2208988800UL;
       // subtract seventy years:
       epoch = secsSince1900 - seventyYears;
       // print Unix time:
-      Serial.println(epoch);
-
 
       // print the hour, minute and second:
       Serial.print("The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
@@ -141,11 +158,13 @@ void loop() {
         Serial.print('0');
       }
       Serial.println(epoch % 60);  // print the second
-    }    
+    }
+
   }
 
   check_reset_time();
 
+  check_sync_ok();
 }
 
 // send an NTP request to the time server at the given address
