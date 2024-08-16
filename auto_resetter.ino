@@ -3,14 +3,17 @@
 
 #define STASSID       "WiFi_SSID"
 #define STAPSK        "WiFi_Pass"
-#define RESET_PERIOD  (30000ul)
 #define LED_PIN       (2)
 #define RELAY_PIN     (4)
+
+// How long to keep the router off
+#define RESET_PERIOD  (30000ul)
+
 // Sync once an hour
 #define SYNC_TIMEOUT  (60*60*1000)
 // If time sync was not done for a long time, should blink LED to notify
 #define SYNC_ERROR_HOURS  (48)
-// Reset every day at RESET_HOUR:RESET_MINUTE
+// Reset every day at RESET_HOUR:RESET_MINUTE. Currently at 2AM UTC
 #define RESET_HOUR    (2)
 #define RESET_MINUTE  (0)
 
